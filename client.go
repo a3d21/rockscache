@@ -122,21 +122,21 @@ func (c *Client) TagAsDeleted2(ctx context.Context, key string) error {
 
 // Fetch returns the value store in cache indexed by the key.
 // If the key doest not exists, call fn to get result, store it in cache, then return.
-func (c *Client) Fetch(key string, expire time.Duration, fn func() (string, error)) (string, error) {
-	return c.Fetch2(c.Options.Context, key, expire, fn)
+func (c *Client) Fetch(key string, expire time.Duration, fn func() (string, error), when func(string) bool) (string, error) {
+	return c.Fetch2(c.Options.Context, key, expire, fn, when)
 }
 
 // Fetch2 returns the value store in cache indexed by the key.
 // If the key doest not exists, call fn to get result, store it in cache, then return.
-func (c *Client) Fetch2(ctx context.Context, key string, expire time.Duration, fn func() (string, error)) (string, error) {
+func (c *Client) Fetch2(ctx context.Context, key string, expire time.Duration, fn func() (string, error), when func(string) bool) (string, error) {
 	ex := expire - c.Options.Delay - time.Duration(rand.Float64()*c.Options.RandomExpireAdjustment*float64(expire))
 	v, err, _ := c.group.Do(key, func() (interface{}, error) {
 		if c.Options.DisableCacheRead {
 			return fn()
 		} else if c.Options.StrongConsistency {
-			return c.strongFetch(ctx, key, ex, fn)
+			return c.strongFetch(ctx, key, ex, fn, when)
 		}
-		return c.weakFetch(ctx, key, ex, fn)
+		return c.weakFetch(ctx, key, ex, fn, when)
 	})
 	return v.(string), err
 }
@@ -155,7 +155,7 @@ func (c *Client) luaSet(ctx context.Context, key string, value string, expire in
 	return err
 }
 
-func (c *Client) fetchNew(ctx context.Context, key string, expire time.Duration, owner string, fn func() (string, error)) (string, error) {
+func (c *Client) fetchNew(ctx context.Context, key string, expire time.Duration, owner string, fn func() (string, error), when func(string) bool) (string, error) {
 	result, err := fn()
 	if err != nil {
 		_ = c.UnlockForUpdate(ctx, key, owner)
@@ -168,11 +168,13 @@ func (c *Client) fetchNew(ctx context.Context, key string, expire time.Duration,
 		}
 		expire = c.Options.EmptyExpire
 	}
-	err = c.luaSet(ctx, key, result, int(expire/time.Second), owner)
+	if when(result) {
+		err = c.luaSet(ctx, key, result, int(expire/time.Second), owner)
+	}
 	return result, err
 }
 
-func (c *Client) weakFetch(ctx context.Context, key string, expire time.Duration, fn func() (string, error)) (string, error) {
+func (c *Client) weakFetch(ctx context.Context, key string, expire time.Duration, fn func() (string, error), when func(string) bool) (string, error) {
 	debugf("weakFetch: key=%s", key)
 	owner := shortuuid.New()
 	r, err := c.luaGet(ctx, key, owner)
@@ -193,15 +195,15 @@ func (c *Client) weakFetch(ctx context.Context, key string, expire time.Duration
 		return r[0].(string), nil
 	}
 	if r[0] == nil {
-		return c.fetchNew(ctx, key, expire, owner, fn)
+		return c.fetchNew(ctx, key, expire, owner, fn, when)
 	}
 	go withRecover(func() {
-		_, _ = c.fetchNew(ctx, key, expire, owner, fn)
+		_, _ = c.fetchNew(ctx, key, expire, owner, fn, when)
 	})
 	return r[0].(string), nil
 }
 
-func (c *Client) strongFetch(ctx context.Context, key string, expire time.Duration, fn func() (string, error)) (string, error) {
+func (c *Client) strongFetch(ctx context.Context, key string, expire time.Duration, fn func() (string, error), when func(string) bool) (string, error) {
 	debugf("strongFetch: key=%s", key)
 	owner := shortuuid.New()
 	r, err := c.luaGet(ctx, key, owner)
@@ -221,7 +223,7 @@ func (c *Client) strongFetch(ctx context.Context, key string, expire time.Durati
 	if r[1] != locked { // normal value
 		return r[0].(string), nil
 	}
-	return c.fetchNew(ctx, key, expire, owner, fn)
+	return c.fetchNew(ctx, key, expire, owner, fn, when)
 }
 
 // RawGet returns the value store in cache indexed by the key, no matter if the key locked or not

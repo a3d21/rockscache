@@ -21,7 +21,7 @@ func TestDisable(t *testing.T) {
 	rc.Options.DisableCacheDelete = true
 	rc.Options.DisableCacheRead = true
 	fn := func() (string, error) { return "", nil }
-	_, err := rc.Fetch2(context.Background(), "key", 60, fn)
+	_, err := rc.Fetch2(context.Background(), "key", 60, fn, allTrue)
 	assert.Nil(t, err)
 	err = rc.TagAsDeleted2(context.Background(), "key")
 	assert.Nil(t, err)
@@ -41,9 +41,9 @@ func testEmptyExpire(t *testing.T, expire time.Duration) {
 	errFn := func() (string, error) {
 		return "", fetchError
 	}
-	_, err := rc.Fetch("key1", 600, fn)
+	_, err := rc.Fetch("key1", 600, fn, allTrue)
 	assert.Nil(t, err)
-	_, err = rc.Fetch("key1", 600, errFn)
+	_, err = rc.Fetch("key1", 600, errFn, allTrue)
 	if expire == 0 {
 		assert.ErrorIs(t, err, fetchError)
 	} else {
@@ -51,9 +51,9 @@ func testEmptyExpire(t *testing.T, expire time.Duration) {
 	}
 
 	rc.Options.StrongConsistency = true
-	_, err = rc.Fetch("key2", 600, fn)
+	_, err = rc.Fetch("key2", 600, fn, allTrue)
 	assert.Nil(t, err)
-	_, err = rc.Fetch("key2", 600, errFn)
+	_, err = rc.Fetch("key2", 600, errFn, allTrue)
 	if expire == 0 {
 		assert.ErrorIs(t, err, fetchError)
 	} else {
@@ -65,11 +65,11 @@ func TestErrorFetch(t *testing.T) {
 	fn := func() (string, error) { return "", fmt.Errorf("error") }
 	clearCache()
 	rc := NewClient(rdb, NewDefaultOptions())
-	_, err := rc.Fetch("key1", 60, fn)
+	_, err := rc.Fetch("key1", 60, fn, allTrue)
 	assert.Equal(t, fmt.Errorf("error"), err)
 
 	rc.Options.StrongConsistency = true
-	_, err = rc.Fetch("key2", 60, fn)
+	_, err = rc.Fetch("key2", 60, fn, allTrue)
 	assert.Equal(t, fmt.Errorf("error"), err)
 }
 
@@ -78,10 +78,10 @@ func TestPanicFetch(t *testing.T) {
 	pfn := func() (string, error) { panic(fmt.Errorf("error")) }
 	clearCache()
 	rc := NewClient(rdb, NewDefaultOptions())
-	_, err := rc.Fetch("key1", 60*time.Second, fn)
+	_, err := rc.Fetch("key1", 60*time.Second, fn, allTrue)
 	assert.Nil(t, err)
 	rc.TagAsDeleted("key1")
-	_, err = rc.Fetch("key1", 60*time.Second, pfn)
+	_, err = rc.Fetch("key1", 60*time.Second, pfn, allTrue)
 	assert.Nil(t, err)
 	time.Sleep(20 * time.Millisecond)
 }
